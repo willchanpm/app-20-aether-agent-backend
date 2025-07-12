@@ -20,21 +20,26 @@ app.add_middleware(
 )
 
 @tool
-def search_attractions(city: str, theme: str) -> str:
-    """Finds themed attractions in a city"""
-    prompt = f"List 3-4 real or plausible {theme}-related attractions in {city}. Include a mix of museums, landmarks, and cultural spots. Format as a simple comma-separated list."
-    response = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7).invoke(prompt)
+def search_attractions(city: str, theme: str, num_days: int) -> str:
+    """Finds themed attractions in a city for a multi-day trip"""
+    # Calculate how many attractions we need based on trip duration
+    # Assume 2-3 attractions per day for a good variety
+    num_attractions = min(num_days * 3, 15)  # Cap at 15 to avoid overwhelming results
+    
+    prompt = f"List {num_attractions} real or plausible {theme}-related attractions in {city}. Include a mix of museums, landmarks, cultural spots, restaurants, and activities. Format as a simple comma-separated list. Focus on attractions that would work well for a {num_days}-day trip."
+    response = ChatOpenAI(model="gpt-4", temperature=0.7).invoke(prompt)
     return response.content
 
 @tool
-def check_budget(amount: int, currency: str) -> str:
-    """Checks if the budget is sufficient for a 3-day trip"""
-    prompt = f"As a travel expert, evaluate if {amount} {currency} is sufficient for a 3-day trip, considering average hotel, food, and activity costs. Provide a brief 1-2 sentence assessment."
-    response = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3).invoke(prompt)
+def check_budget(amount: int, currency: str, num_days: int) -> str:
+    """Checks if the budget is sufficient for a multi-day trip"""
+    prompt = f"As a travel expert, evaluate if {amount} {currency} is sufficient for a {num_days}-day trip, considering average hotel, food, activities, and transportation costs. Provide a brief 1-2 sentence assessment and suggest budget adjustments if needed."
+    response = ChatOpenAI(model="gpt-4", temperature=0.3).invoke(prompt)
     return response.content
 
 tools = [search_attractions, check_budget]
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0, streaming=True)
+# Upgrade to GPT-4 for better reasoning and planning capabilities
+llm = ChatOpenAI(model="gpt-4", temperature=0, streaming=True)
 agent_executor = initialize_agent(tools, llm, agent=AgentType.OPENAI_FUNCTIONS, verbose=True)
 
 class DayActivity(TypedDict):
@@ -47,7 +52,8 @@ class Itinerary(TypedDict):
 
 def parse_itinerary(text: str, destination: str) -> Itinerary:
     """Parse the agent's response into a structured itinerary"""
-    day_sections = re.split(r'Day \d+:|DAY \d+:', text)
+    # Improved regex to catch more day formats
+    day_sections = re.split(r'Day \d+:|DAY \d+:|Day \d+ -|DAY \d+ -', text)
     if len(day_sections) <= 1:
         return {
             "title": f"Trip to {destination}",
@@ -82,11 +88,39 @@ async def stream_plan(
     budget: int = Query(...),
     interests: List[str] = Query(default=[])
 ):
+    # Extract number of days from the dates parameter
+    # This helps us pass the correct duration to our tools
+    num_days = 1  # Default fallback
+    try:
+        # Try to extract number from dates string (e.g., "5 days", "1 week", "3-day")
+        if "day" in dates.lower():
+            match = re.search(r'(\d+)', dates)
+            if match:
+                num_days = int(match.group(1))
+        elif "week" in dates.lower():
+            match = re.search(r'(\d+)', dates)
+            if match:
+                num_days = int(match.group(1)) * 7
+        else:
+            # If we can't parse it, assume it's a number
+            match = re.search(r'(\d+)', dates)
+            if match:
+                num_days = int(match.group(1))
+    except (AttributeError, ValueError):
+        # If parsing fails, keep default of 1 day
+        pass
+    
     theme = ", ".join(interests) if interests else "general"
+    
+    # Much more explicit prompt that emphasizes the exact duration
     prompt = (
-        f"Plan a {dates}-long trip to {destination} focused on {theme}. "
-        f"Use tools to search attractions and validate the budget of {budget} {currency}. "
-        "Structure your response by days, with a clear 'Day X:' format for each day."
+        f"You are a travel planning expert. Create a detailed {dates}-long trip itinerary to {destination} focused on {theme}. "
+        f"IMPORTANT: Your response MUST include exactly {num_days} days of activities, no more and no less. "
+        f"Use the search_attractions tool to find {num_days * 3} relevant attractions in {destination}. "
+        f"Use the check_budget tool to validate if {budget} {currency} is sufficient for {num_days} days. "
+        f"Structure your response with clear 'Day X:' headers for each of the {num_days} days. "
+        f"Each day should include 2-4 activities, meals, and transportation suggestions. "
+        f"Make sure to plan for the FULL {num_days} days as requested."
     )
 
     async def event_stream():
