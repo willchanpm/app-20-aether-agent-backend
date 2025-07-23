@@ -28,14 +28,14 @@ def search_attractions(city: str, theme: str, num_days: int) -> str:
     
     prompt = f"List {num_attractions} real or plausible {theme}-related attractions in {city}. Include a mix of museums, landmarks, cultural spots, restaurants, and activities. Format as a simple comma-separated list. Focus on attractions that would work well for a {num_days}-day trip."
     response = ChatOpenAI(model="gpt-4", temperature=0.7).invoke(prompt)
-    return response.content
+    return str(response.content)
 
 @tool
 def check_budget(amount: int, currency: str, num_days: int) -> str:
     """Checks if the budget is sufficient for a multi-day trip"""
     prompt = f"As a travel expert, evaluate if {amount} {currency} is sufficient for a {num_days}-day trip, considering average hotel, food, activities, and transportation costs. Provide a brief 1-2 sentence assessment and suggest budget adjustments if needed."
     response = ChatOpenAI(model="gpt-4", temperature=0.3).invoke(prompt)
-    return response.content
+    return str(response.content)
 
 tools = [search_attractions, check_budget]
 # Upgrade to GPT-4 for better reasoning and planning capabilities
